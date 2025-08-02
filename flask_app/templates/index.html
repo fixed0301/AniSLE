@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Sketch App</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+    .container { max-width: 800px; margin: 0 auto; text-align: center; }
+    #canvasContainer { position: relative; }
+    #imageCanvas { position: absolute; top: 0; left: 0; }
+    button { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 10px; cursor: pointer; }
+    button:hover { background-color: #45a049; }
+    img { max-width: 256px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AniSLE : Sketch to Locally Edit</h1>
+    <form method="post" enctype="multipart/form-data">
+      <input type="file" name="image" accept="image/*">
+      <input type="submit" value="업로드">
+    </form>
+    {% if image_path %}
+      <img src="{{ url_for('uploaded_file', filename=image_path) }}" id="baseImage" style="display: none;">
+      <div id="canvasContainer"></div>
+      <form method="post" action="/save_sketch" id="sketchForm">
+        <input type="hidden" name="filename" value="{{ image_path }}">
+        <input type="hidden" name="sketch" id="sketchData">
+        <button type="submit">저장</button>
+      </form>
+      {% if result_path %}
+        <h2>결과</h2>
+        <img src="{{ url_for('result_file', filename=result_path) }}" alt="Result">
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <script>
+    let baseImage;
+    let canvas;
+
+    function setup() {
+      const img = document.getElementById('baseImage');
+      if (img) {
+        baseImage = loadImage(img.src, () => {
+          canvas = createCanvas(256, 256);
+          canvas.parent('canvasContainer');
+          clear();
+          image(baseImage, 0, 0, 256, 256);
+        });
+      }
+    }
+
+    function draw() {
+      if (mouseIsPressed && mouseX >= 0 && mouseX <= 256 && mouseY >= 0 && mouseY <= 256) {
+        stroke(255, 0, 0);
+        strokeWeight(3);
+        line(mouseX, mouseY, pmouseX, pmouseY);
+      }
+    }
+
+    function saveSketch(event) {
+      event.preventDefault(); // 폼 전송 막기
+      if (canvas) {
+        const dataURL = canvas.elt.toDataURL('image/png');
+        document.getElementById('sketchData').value = dataURL;
+        document.getElementById('sketchForm').submit();
+      }
+    }
+
+    document.getElementById('sketchForm').addEventListener('submit', saveSketch);
+  </script>
+</body>
+</html>
