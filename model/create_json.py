@@ -7,7 +7,10 @@ input_image = Image.open("../flask_app/static/uploads/groundimg.jpeg").convert("
 
 pose = detector(input_image,draw_pose=None)
 
-# 키포인트 출력
+# 이미지 저장
+# skeleton = detector(input_image, output_type="pil", include_hands=True, include_face=True)
+# skeleton.save("skeleton.png")
+
 print("Body Keypoints (x, y, confidence):")
 for i, kp in enumerate(pose['bodies']):
     if pose['body_scores'][i // 18][i % 18] != -1:  # 유효한 키포인트만 출력
