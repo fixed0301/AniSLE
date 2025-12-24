@@ -21,7 +21,9 @@
   </form>
 
   {% if image_path %}
-    <img id="baseImage" src="{{ url_for('uploaded_file', filename=image_path) }}" style="display:none;" />
+    <img id="baseImage" src="{{ url_for('uploaded_file', filename=image_path) }}" 
+         style="display:block; margin: 20px auto;" 
+         crossorigin="anonymous" />
 
     <!-- p5 캔버스가 들어갈 자리 -->
     <div id="canvasContainer"></div>

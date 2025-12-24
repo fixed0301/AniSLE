@@ -2,6 +2,7 @@ from flask import Flask, request, render_template, send_from_directory, abort
 from PIL import Image
 from werkzeug.utils import secure_filename
 import os
+import glob
 
 app = Flask(__name__)
 
@@ -18,17 +19,28 @@ app.config['SKETCH_FOLDER'] = SKETCH_FOLDER
 app.config['RESULT_FOLDER'] = RESULT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+def get_next_index():
+    """업로드 폴더에서 다음 인덱스 번호 반환"""
+    files = glob.glob(os.path.join(UPLOAD_FOLDER, '*.*'))
+    indices = []
+    for f in files:
+        basename = os.path.basename(f)
+        name = os.path.splitext(basename)[0]
+        if name.isdigit():
+            indices.append(int(name))
+    return max(indices) + 1 if indices else 0
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         if 'image' in request.files:
             file = request.files['image']
             if file and file.filename:
-                orig_name = secure_filename(file.filename)
-                if len(orig_name) > 64:
-                    base, ext = os.path.splitext(orig_name)
-                    orig_name = base[:64 - len(ext)] + ext
-                filename = orig_name
+                # 다음 인덱스 번호 가져오기
+                index = get_next_index()
+                ext = os.path.splitext(file.filename)[1]
+                filename = f"{index}{ext}"
+                
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 image = Image.open(file).convert('RGB').resize((256, 256), Image.Resampling.LANCZOS)
                 image.save(file_path)
