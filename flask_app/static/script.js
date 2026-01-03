@@ -3,10 +3,10 @@ let sketchLayer;
 let mainCanvas;
 
 function setup() {
-  mainCanvas = createCanvas(256, 256);
+  mainCanvas = createCanvas(512, 512);
   mainCanvas.parent('canvasContainer');
 
-  sketchLayer = createGraphics(256, 256);
+  sketchLayer = createGraphics(512, 512);
   sketchLayer.clear();
 
   const imgTag = document.getElementById('baseImage');
@@ -27,7 +27,7 @@ function draw() {
       mouseX >= 0 && mouseX <= width &&
       mouseY >= 0 && mouseY <= height) {
     sketchLayer.stroke(255, 0, 0);
-    sketchLayer.strokeWeight(3);
+    sketchLayer.strokeWeight(5);
     sketchLayer.line(mouseX, mouseY, pmouseX, pmouseY);
   }
 }

@@ -7,39 +7,151 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
-    #canvasContainer { margin: 20px auto; width: 256px; height: 256px; }
+    .container { display: flex; justify-content: center; gap: 20px; margin: 20px auto; max-width: 1600px; }
+    .panel { flex: 1; max-width: 512px; }
+    .panel h3 { margin: 10px 0; }
+    .panel img { width: 100%; height: auto; border: 2px solid #ddd; border-radius: 4px; }
+    #canvasContainer { width: 512px; height: 512px; margin: 0 auto; border: 2px solid #ddd; border-radius: 4px; }
     button { padding: 8px 16px; margin: 8px; background: #4CAF50; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
     button:hover { background: #45a049; }
-    img { max-width: 256px; display: block; margin: 8px auto; }
+    .upload-section { margin-bottom: 20px; }
   </style>
 </head>
 <body>
   <h1>AniSLE : Sketch to Locally Edit</h1>
-  <form method="post" enctype="multipart/form-data">
-    <input type="file" name="image" accept="image/*"/>
-    <button type="submit">업로드</button>
-  </form>
+  
+  <div class="upload-section">
+    <form method="post" action="/" enctype="multipart/form-data">
+      <input type="file" name="image" accept="image/*"/>
+      <button type="submit">업로드</button>
+    </form>
+  </div>
 
   {% if image_path %}
-    <img id="baseImage" src="{{ url_for('uploaded_file', filename=image_path) }}" style="display:none;" />
+    <div class="container">
+      <!-- 원본 이미지 -->
+      <div class="panel">
+        <h3>원본 이미지</h3>
+        <img id="baseImage" src="{{ url_for('uploaded_file', filename=image_path) }}" crossorigin="anonymous" />
+      </div>
 
-    <!-- p5 캔버스가 들어갈 자리 -->
-    <div id="canvasContainer"></div>
+      <!-- 스케치 캔버스 -->
+      <div class="panel">
+        <h3>스케치 그리기</h3>
+        <div id="canvasContainer"></div>
+        <form id="sketchForm">
+          <input type="hidden" name="filename" value="{{ image_path }}" />
+          <button type="submit">생성 시작</button>
+        </form>
+      </div>
 
-    <!-- 스케치 저장 -->
-    <form id="sketchForm">
-      <input type="hidden" name="filename" value="{{ image_path }}" />
-      <button type="submit">저장</button>
-    </form>
+      <!-- 결과 이미지 -->
+      <div class="panel">
+        <h3>생성 결과</h3>
+        {% if result_path %}
+          <img src="{{ url_for('result_file', filename=result_path) }}" alt="Result" />
+        {% else %}
+          <div style="width: 100%; height: 512px; border: 2px dashed #ddd; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #999;">
+            결과 대기 중
+          </div>
+        {% endif %}
+      </div>
+    </div>
 
-    <!-- 결과와 스케치만 보기 링크 -->
-    {% if result_path %}
-      <h2>결과</h2>
-      <img src="{{ url_for('result_file', filename=result_path) }}" alt="Result" />
-      <p>
-        스케치만 보기:
-        <a href="{{ url_for('sketch_file', filename='sketch_' + image_path.split('.')[0] + '.png') }}" target="_blank">여기</a>
-      </p>
+    <!-- Skeleton 시각화 섹션 -->
+    <div style="margin-top: 40px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+      <h2>처리 과정 시각화</h2>
+      <div class="container">
+        <!-- 원본 Skeleton -->
+        <div class="panel">
+          <h3>탐지된 포즈 (Original Pose)</h3>
+          {% if image_path %}
+            <img src="{{ url_for('pose_file', filename=image_path.split('.')[0] + '.png') }}" 
+                 alt="Original Pose" 
+                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            <div style="width: 100%; height: 512px; border: 2px dashed #ddd; border-radius: 4px; display: none; align-items: center; justify-content: center; color: #999;">
+              포즈 추출 대기 중
+            </div>
+          {% endif %}
+          <p style="color: #666; margin-top: 10px;">업로드된 이미지에서 자동으로 탐지된 사람의 포즈</p>
+        </div>
+
+        <!-- Aligned Skeleton -->
+        <div class="panel">
+          <h3>정렬된 포즈 (Aligned Pose)</h3>
+          {% if image_path %}
+            <img src="{{ url_for('aligned_pose_file', filename='aligned_' + image_path.split('.')[0] + '.png') }}" 
+                 alt="Aligned Pose"
+                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            <div style="width: 100%; height: 512px; border: 2px dashed #ddd; border-radius: 4px; display: none; align-items: center; justify-content: center; color: #999;">
+              정렬 대기 중
+            </div>
+          {% endif %}
+          <p style="color: #666; margin-top: 10px;">스케치에 맞춰 조정된 포즈 (빨간 선 = 스케치)</p>
+        </div>
+
+        <!-- 생성된 Mask -->
+        <div class="panel">
+          <h3>변경 영역 마스크 (Change Mask)</h3>
+          {% if image_path %}
+            <img src="{{ url_for('mask_file', filename='mask_' + image_path.split('.')[0] + '.png') }}" 
+                 alt="Mask"
+                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            <div style="width: 100%; height: 512px; border: 2px dashed #ddd; border-radius: 4px; display: none; align-items: center; justify-content: center; color: #999;">
+              마스크 생성 대기 중
+            </div>
+          {% endif %}
+          <p style="color: #666; margin-top: 10px;">AI가 수정할 영역 (하얀색 = 변경, 검은색 = 유지)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 처리 진행상황 표시 -->
+    {% if processing %}
+      <div id="progressContainer" style="margin: 20px auto; max-width: 600px;">
+        <h2>AI 처리 중...</h2>
+        <div id="progressBar" style="width: 100%; height: 30px; background: #f0f0f0; border-radius: 5px; overflow: hidden;">
+          <div id="progressFill" style="width: 0%; height: 100%; background: #4CAF50; transition: width 0.3s;"></div>
+        </div>
+        <p id="progressMessage" style="margin-top: 10px;">처리 대기 중...</p>
+      </div>
+      
+      <script>
+        const idx = "{{ idx }}";
+        const eventSource = new EventSource(`/stream/${idx}`);
+        
+        eventSource.onmessage = function(event) {
+          const data = JSON.parse(event.data);
+          console.log('Status update:', data);
+          
+          // Progress bar 업데이트
+          const progress = (data.step / 3) * 100;
+          document.getElementById('progressFill').style.width = progress + '%';
+          document.getElementById('progressMessage').textContent = data.message;
+          
+          // 완료 시 결과 이미지 표시
+          if (data.status === 'completed') {
+            eventSource.close();
+            document.getElementById('progressMessage').textContent = '완료! 페이지를 새로고침하여 결과를 확인하세요.';
+            setTimeout(() => {
+              location.reload();
+            }, 1000);
+          }
+          
+          // 에러 시
+          if (data.status === 'error') {
+            eventSource.close();
+            document.getElementById('progressBar').style.background = '#ffcccc';
+            document.getElementById('progressFill').style.background = '#ff0000';
+            document.getElementById('progressMessage').textContent = '오류: ' + data.message;
+          }
+        };
+        
+        eventSource.onerror = function(error) {
+          console.error('SSE Error:', error);
+          eventSource.close();
+        };
+      </script>
     {% endif %}
 
     <script>const filename = "{{ image_path }}";</script>
