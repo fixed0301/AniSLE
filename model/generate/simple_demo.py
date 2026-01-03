@@ -11,6 +11,7 @@ import numpy as np
 
 # Add current directory to path for local imports (AniSLE structure)
 current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)  # Go up to model/ directory
 sys.path.insert(0, current_dir)
 
 from src.models.stage2_inpaint_unet_2d_condition import Stage2_InapintUNet2DConditionModel
@@ -188,27 +189,28 @@ def run_inference(
     # Load source image
     s_img = Image.open(source_image_path).convert("RGB").resize(image_size, Image.BICUBIC)
     
-    # Load user mask if provided (for post-processing blend only)
+    # Load user mask if provided
     user_mask = None
     if mask_path and os.path.exists(mask_path):
         print(f"Loading user mask from: {mask_path}")
         mask_img_full = Image.open(mask_path).convert('L').resize(image_size, Image.BICUBIC)
         user_mask = np.array(mask_img_full) / 255.0  # 1=use generated, 0=keep source
-        print(f"  Mask will blend {user_mask.mean()*100:.1f}% from generated result")
+        print(f"  Mask region: {user_mask.mean()*100:.1f}% will be replaced with generated result")
     
-    # Create source + black image pair (PCDMs standard format)
-    # Always use black for right side - generates full new image with target pose
+    # Create input for PCDMs: source | black (full generation)
+    # PCDMs generates a complete new image with target pose on the right
     black_image = Image.new("RGB", s_img.size, (0, 0, 0)).resize(image_size, Image.BICUBIC)
     
     s_img_t_mask = Image.new("RGB", (s_img.width * 2, s_img.height))
     s_img_t_mask.paste(s_img, (0, 0))
     s_img_t_mask.paste(black_image, (s_img.width, 0))
+    print(f"  Input: [source image | black] for full generation with target pose")
     
     # Extract poses
     print("\nExtracting poses...")
-    # Change to current directory for pose extraction
+    # Change to parent directory for pose extraction
     original_dir = os.getcwd()
-    os.chdir(current_dir)
+    os.chdir(parent_dir)
     try:
         s_pose = inference_pose(
             os.path.join(original_dir, source_image_path) if not os.path.isabs(source_image_path) else source_image_path,
@@ -230,14 +232,9 @@ def run_inference(
             if isinstance(keypoints, list):
                 print(f"  Drawing skeleton directly from {len(keypoints)} keypoints")
                 
-                # Scale keypoints to match target image size (512x512)
-                # Assuming JSON keypoints are from original 256x256 image
-                original_size = 256
-                target_size = image_size[0]  # 512
-                scale = target_size / original_size
-                
-                scaled_keypoints = [[int(kp[0] * scale), int(kp[1] * scale)] for kp in keypoints]
-                print(f"  Scaled keypoints from {original_size}x{original_size} to {target_size}x{target_size} (scale: {scale})")
+                # Use keypoints as-is (already at correct scale)
+                scaled_keypoints = [[int(kp[0]), int(kp[1])] for kp in keypoints]
+                print(f"  Using keypoints at target size: {image_size[0]}x{image_size[1]}")
                 
                 # Create black canvas
                 pose_canvas = Image.new("RGB", image_size, (0, 0, 0))
@@ -358,27 +355,36 @@ def run_inference(
     output.save(output_path.replace('.png', '_full.png'))
     print(f"DEBUG: Full output saved to {output_path.replace('.png', '_full.png')} (size: {output.size})")
     
-    # Extract right half (generated)
+    # Extract right half (full generated image with target pose)
     result = output.crop((image_size[0], 0, image_size[0] * 2, image_size[1]))
     
     # Save raw generated result for debugging
     result.save(output_path.replace('.png', '_raw.png'))
-    print(f"DEBUG: Raw generated result saved to {output_path.replace('.png', '_raw.png')}")
+    print(f"DEBUG: Full generated result saved to {output_path.replace('.png', '_raw.png')}")
     
-    # Apply user mask for post-processing blend
+    # Apply mask blending if mask provided
     if user_mask is not None:
-        print("\nApplying user mask blend...")
-        # user_mask: 1=use generated, 0=keep source
-        mask_3ch = np.stack([user_mask] * 3, axis=2)
+        from scipy.ndimage import gaussian_filter
+        
+        print("\nApplying mask blending with Gaussian blur...")
+        
+        # Apply Gaussian blur to mask for smooth transition
+        blur_radius = 5  # pixels
+        mask_blurred = gaussian_filter(user_mask, sigma=blur_radius)
+        mask_blurred = np.clip(mask_blurred, 0, 1)
+        
+        # Expand to 3 channels
+        mask_3ch = np.stack([mask_blurred] * 3, axis=2)
         
         source_array = np.array(s_img).astype(float)
         result_array = np.array(result).astype(float)
         
-        # Where mask=1 (white): use generated result
-        # Where mask=0 (black): keep source image
+        # Blend: mask=1 (white) uses generated, mask=0 (black) keeps source
         blended = result_array * mask_3ch + source_array * (1 - mask_3ch)
         result = Image.fromarray(blended.astype(np.uint8))
-        print(f"  Final blend: {user_mask.mean()*100:.1f}% from generated, {(1-user_mask.mean())*100:.1f}% from source")
+        
+        print(f"  Blended {user_mask.mean()*100:.1f}% from generated pose, {(1-user_mask.mean())*100:.1f}% from source")
+        print(f"  Gaussian blur radius: {blur_radius} pixels for smooth edges")
     
     # Save result
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)

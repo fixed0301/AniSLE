@@ -8,6 +8,8 @@ import subprocess
 import json
 import time
 import threading
+import numpy as np
+import cv2
 
 # Add model directories to path
 model_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'model')
@@ -139,37 +141,174 @@ def save_sketch():
                 # 통합 파이프라인 실행 (포즈 추출 → 정렬 → 마스크 → 생성)
                 print(f"Running full pipeline for idx={idx}")
                 
-                # Step 1: 포즈 로드
-                processing_status[idx] = {'status': 'processing', 'step': 1, 'message': 'Step 1/4: 포즈 keypoints 로드 중...'}
-                import time
-                time.sleep(0.5)
+                # Step 1: 포즈 추출
+                processing_status[idx] = {'status': 'processing', 'step': 1, 'message': 'Step 1/4: DWPose로 원본 이미지에서 포즈 keypoints 추출 중...'}
                 
-                # Step 2: 정렬
-                processing_status[idx] = {'status': 'processing', 'step': 2, 'message': 'Step 2/4: 스케치에 포즈 정렬 중...'}
-                time.sleep(0.5)
+                # Extract pose from source image
+                sys.path.insert(0, model_dir)
+                import openpose_simple
+                import align
+                from PIL import Image as PILImage
                 
-                # Step 3: 마스크 생성
-                processing_status[idx] = {'status': 'processing', 'step': 3, 'message': 'Step 3/4: 마스크 생성 중...'}
+                source_img = PILImage.open(image_path).convert('RGB').resize((512, 512), PILImage.Resampling.LANCZOS)
+                pose_image, keypoints = openpose_simple.extract_pose(source_img)
                 
-                pipeline_script = os.path.join(model_dir, 'pipeline.py')
-                pipeline_result = subprocess.run(
-                    [sys.executable, pipeline_script, '--idx', str(idx)],
-                    cwd=model_dir,
+                # Save original pose
+                pose_dir = os.path.join(model_dir, 'pose', 'pose_img')
+                pose_json_dir = os.path.join(model_dir, 'pose', 'pose_json')
+                os.makedirs(pose_dir, exist_ok=True)
+                os.makedirs(pose_json_dir, exist_ok=True)
+                
+                pose_image.save(os.path.join(pose_dir, f'pose_{idx}.png'))
+                
+                # Save keypoints as JSON
+                import json
+                keypoints_data = {'keypoints': keypoints, 'image_size': [512, 512]}
+                with open(os.path.join(pose_json_dir, f'keypoints_{idx}.json'), 'w') as f:
+                    json.dump(keypoints_data, f)
+                
+                print(f"  ✓ Extracted {len(keypoints)} keypoints")
+                
+                # Step 2: Align sketch with pose
+                processing_status[idx] = {'status': 'processing', 'step': 2, 'message': 'Step 2/4: 스케치 라인에 맞춰 팔 keypoints 정렬 중 (팔꿈치/손목 위치 계산)...'}
+                
+                # Load sketch
+                sketch_img = PILImage.open(sketch_path).convert('RGBA')
+                sketch_np = np.array(sketch_img)
+                
+                # Convert RGBA to BGR for OpenCV processing
+                sketch_bgr = cv2.cvtColor(sketch_np, cv2.COLOR_RGBA2BGR)
+                
+                # Get sketch red pixels
+                sketch_pixels = align.get_sketch_red_pixels(sketch_bgr)
+                
+                # Find which arm to align
+                if sketch_pixels:
+                    sketch_start = min(sketch_pixels, key=lambda p: np.sqrt((p[0] - keypoints[2][0])**2 + (p[1] - keypoints[2][1])**2))
+                    arm_to_align = align.find_closest_arm(sketch_start, keypoints)
+                    aligned_keypoints = align.align_arm_to_sketch(keypoints, sketch_pixels, arm_to_align)
+                else:
+                    print("  Warning: No sketch pixels found, using original keypoints")
+                    aligned_keypoints = keypoints
+                
+                # Save aligned keypoints
+                aligned_json_path = os.path.join(pose_json_dir, f'keypoints_aligned_{idx}.json')
+                with open(aligned_json_path, 'w') as f:
+                    json.dump({'keypoints': aligned_keypoints, 'image_size': [512, 512]}, f)
+                
+                # Draw aligned pose
+                aligned_pose_img = np.array(source_img).copy()
+                align.draw_skeleton_on_image(
+                    aligned_pose_img,
+                    aligned_keypoints,
+                    use_openpose_colors=True
+                )
+                PILImage.fromarray(aligned_pose_img).save(os.path.join(pose_dir, f'aligned_{idx}.png'))
+                
+                print(f"  ✓ Aligned pose to sketch")
+                
+                # Step 3: Generate mask (include both original and target arm positions)
+                processing_status[idx] = {'status': 'processing', 'step': 3, 'message': 'Step 3/4: 변경 영역 마스크 생성 중 (원본 팔 + 타겟 팔 영역 통합)...'}
+                
+                # Create mask from sketch
+                mask_dir = os.path.join(model_dir, 'mask', 'mask_img')
+                os.makedirs(mask_dir, exist_ok=True)
+                
+                # 1. Sketch mask (target position)
+                sketch_alpha = np.array(sketch_img)[:, :, 3]
+                sketch_mask = (sketch_alpha > 10).astype(np.uint8) * 255
+                
+                # 2. Original arm mask (from original keypoints) - THICK LINES
+                original_arm_mask = np.zeros((512, 512), dtype=np.uint8)
+                
+                # Determine which arm was changed
+                if arm_to_align == 'right':
+                    arm_keypoints = [keypoints[2], keypoints[3], keypoints[4]]  # RShoulder, RElbow, RWrist
+                elif arm_to_align == 'left':
+                    arm_keypoints = [keypoints[5], keypoints[6], keypoints[7]]  # LShoulder, LElbow, LWrist
+                else:
+                    arm_keypoints = []
+                
+                # Draw original arm path with THICK lines
+                for i in range(len(arm_keypoints) - 1):
+                    pt1 = tuple(map(int, arm_keypoints[i]))
+                    pt2 = tuple(map(int, arm_keypoints[i + 1]))
+                    cv2.line(original_arm_mask, pt1, pt2, 255, thickness=40)
+                
+                # Add circles at joints for better coverage
+                for pt in arm_keypoints:
+                    cv2.circle(original_arm_mask, tuple(map(int, pt)), 25, 255, -1)
+                
+                # 3. Aligned arm mask (target position from aligned keypoints)
+                aligned_arm_mask = np.zeros((512, 512), dtype=np.uint8)
+                
+                if arm_to_align == 'right':
+                    aligned_arm_keypoints = [aligned_keypoints[2], aligned_keypoints[3], aligned_keypoints[4]]
+                elif arm_to_align == 'left':
+                    aligned_arm_keypoints = [aligned_keypoints[5], aligned_keypoints[6], aligned_keypoints[7]]
+                else:
+                    aligned_arm_keypoints = []
+                
+                for i in range(len(aligned_arm_keypoints) - 1):
+                    pt1 = tuple(map(int, aligned_arm_keypoints[i]))
+                    pt2 = tuple(map(int, aligned_arm_keypoints[i + 1]))
+                    cv2.line(aligned_arm_mask, pt1, pt2, 255, thickness=40)
+                
+                # Add circles at aligned joints
+                for pt in aligned_arm_keypoints:
+                    cv2.circle(aligned_arm_mask, tuple(map(int, pt)), 25, 255, -1)
+                
+                # 4. Combine all masks
+                combined_mask = np.maximum(sketch_mask, np.maximum(original_arm_mask, aligned_arm_mask))
+                
+                # 5. Expand to create smooth blob covering both positions
+                kernel_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (45, 45))
+                mask_expanded = cv2.dilate(combined_mask, kernel_large, iterations=2)
+                
+                # 6. Fill convex hull for complete coverage
+                contours, _ = cv2.findContours(mask_expanded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    # Get convex hull of largest contour
+                    largest_contour = max(contours, key=cv2.contourArea)
+                    hull = cv2.convexHull(largest_contour)
+                    mask_final = np.zeros_like(mask_expanded)
+                    cv2.drawContours(mask_final, [hull], -1, 255, -1)
+                else:
+                    mask_final = mask_expanded
+                
+                mask_path_save = os.path.join(mask_dir, f'mask_{idx}.png')
+                PILImage.fromarray(mask_final).save(mask_path_save)
+                
+                coverage = (mask_final > 128).sum() / mask_final.size * 100
+                print(f"  ✓ Generated blob mask: {coverage:.1f}% coverage (original + target arm)")
+                
+                # Step 4: AI 생성 (IP-Adapter + ControlNet)
+                processing_status[idx] = {'status': 'processing', 'step': 4, 'message': 'Step 4/4: AI 이미지 생성 중 (IP-Adapter로 외모 유지 + ControlNet으로 포즈 변경, 약 2-3분 소요)...'}
+                
+                ipadapter_script = os.path.join(model_dir, 'generate', 'ipadapter_demo.py')
+                ipadapter_result = subprocess.run(
+                    [sys.executable, ipadapter_script, '--idx', str(idx), '--steps', '50', '--prompt', 'detailed human arm with sleeve, natural arm pose, realistic skin, proper anatomy, preserve clothing texture', '--guidance', '8.0', '--controlnet-scale', '4.5', '--ip-scale', '0.65', '--strength', '0.92', '--no-expand-arm'],
+                    cwd=os.path.join(model_dir, 'generate'),
                     capture_output=True,
                     text=True,
                     timeout=400  # 6-7 minutes total
                 )
                 
-                # Step 4: 이미지 생성
-                if pipeline_result.returncode == 0:
-                    processing_status[idx] = {'status': 'processing', 'step': 4, 'message': 'Step 4/4: AI 이미지 생성 중 (약 2-3분 소요)...'}
+                if ipadapter_result.returncode != 0:
+                    print(f"IP-Adapter error: {ipadapter_result.stderr}")
+                    raise Exception(f"IP-Adapter failed: {ipadapter_result.stderr}")
                 
-                if pipeline_result.returncode != 0:
-                    print(f"Pipeline error: {pipeline_result.stderr}")
-                    raise Exception(f"Pipeline failed: {pipeline_result.stderr}")
+                print(f"IP-Adapter output: {ipadapter_result.stdout}")
                 
-                print(f"Pipeline output: {pipeline_result.stdout}")
-                processing_status[idx] = {'status': 'completed', 'step': 3, 'message': '처리 완료!', 'result': f'result_{idx}.png'}
+                # 결과 파일을 Flask 결과 폴더로 복사
+                generated_file = os.path.join(model_dir, '..', 'flask_app', 'data', 'results', f'{idx}_ipadapter.png')
+                result_filename = f'result_{idx}.png'
+                result_path = os.path.join(app.config['RESULT_FOLDER'], result_filename)
+                if os.path.exists(generated_file):
+                    import shutil
+                    shutil.copy(generated_file, result_path)
+                
+                processing_status[idx] = {'status': 'completed', 'step': 4, 'message': '처리 완료!', 'result': result_filename}
                 
             except subprocess.TimeoutExpired:
                 print("AI processing timeout")

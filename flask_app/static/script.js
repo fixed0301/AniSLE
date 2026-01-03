@@ -44,6 +44,7 @@ function saveSketch(event) {
     fetch('/save_sketch', { method: 'POST', body: formData })
       .then(res => res.text())
       .then(html => {
+        // HTML 응답을 직접 표시
         document.open();
         document.write(html);
         document.close();

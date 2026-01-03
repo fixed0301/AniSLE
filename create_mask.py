@@ -22,7 +22,7 @@ class MaskCreator:
         return: rgb numpy
         """
         mask = self.object_mask(h, w)
-        kernel = np.ones((blur_kernel+3,blur_kernel+3),np.float32)
+        kernel = np.ones((blur_kernel+10,blur_kernel+10),np.float32)  # Increased from 3 to 10 for wider radius
         expand_mask = cv2.dilate(mask,kernel,iterations = 1)
         noise = np.random.normal(noise_loc, noise_range, mask.shape)
         noise[noise>1] = 1

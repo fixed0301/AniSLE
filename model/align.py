@@ -95,54 +95,67 @@ def align_arm_to_sketch(original_keypoints: List[Tuple[int, int]], sketch_pixels
     def distance(p1, p2):
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
-    # Find the sketch points closest to the original elbow and wrist
     if not sketch_pixels:
         print("스케치 픽셀이 없습니다. 정렬을 건너뜁니다.")
         return original_keypoints
-
-    closest_elbow_pixel = min(sketch_pixels, key=lambda p: distance(p, elbow))
-    closest_wrist_pixel = min(sketch_pixels, key=lambda p: distance(p, wrist))
 
     # Calculate original arm segment lengths
     original_upper_arm_length = distance(shoulder, elbow)
     original_forearm_length = distance(elbow, wrist)
 
-    # New elbow point is the original shoulder moved along the direction to the closest sketch point
-    upper_arm_direction = (closest_elbow_pixel[0] - shoulder[0], closest_elbow_pixel[1] - shoulder[1])
-    upper_arm_length = distance(shoulder, closest_elbow_pixel)
-
-    if upper_arm_length > 0:
-        unit_vector_upper = (upper_arm_direction[0] / upper_arm_length, upper_arm_direction[1] / upper_arm_length)
+    # Find sketch start and end points
+    # Start: closest to shoulder
+    # End: farthest from shoulder
+    start_pixel = min(sketch_pixels, key=lambda p: distance(p, shoulder))
+    end_pixel = max(sketch_pixels, key=lambda p: distance(p, shoulder))
+    
+    print(f"  Sketch: start={start_pixel}, end={end_pixel}, {len(sketch_pixels)} pixels")
+    
+    # Direction from shoulder toward the end of the sketch
+    sketch_direction = (end_pixel[0] - start_pixel[0], end_pixel[1] - start_pixel[1])
+    sketch_length = distance(start_pixel, end_pixel)
+    
+    if sketch_length > 0:
+        # Unit vector along the sketch direction
+        unit_vector = (sketch_direction[0] / sketch_length, sketch_direction[1] / sketch_length)
+        
+        # New elbow: move from shoulder along sketch direction by upper arm length
         new_elbow = (
-            int(shoulder[0] + unit_vector_upper[0] * original_upper_arm_length),
-            int(shoulder[1] + unit_vector_upper[1] * original_upper_arm_length)
+            int(shoulder[0] + unit_vector[0] * original_upper_arm_length),
+            int(shoulder[1] + unit_vector[1] * original_upper_arm_length)
         )
-    else:
-        new_elbow = elbow
-
-    # New wrist point is the new elbow moved along the direction to the closest sketch point
-    forearm_direction = (closest_wrist_pixel[0] - new_elbow[0], closest_wrist_pixel[1] - new_elbow[1])
-    forearm_length = distance(new_elbow, closest_wrist_pixel)
-
-    if forearm_length > 0:
-        unit_vector_forearm = (forearm_direction[0] / forearm_length, forearm_direction[1] / forearm_length)
+        
+        # New wrist: continue from elbow along sketch direction by forearm length
         new_wrist = (
-            int(new_elbow[0] + unit_vector_forearm[0] * original_forearm_length),
-            int(new_elbow[1] + unit_vector_forearm[1] * original_forearm_length)
+            int(new_elbow[0] + unit_vector[0] * original_forearm_length),
+            int(new_elbow[1] + unit_vector[1] * original_forearm_length)
         )
     else:
-        new_wrist = wrist
+        # Sketch is just a point
+        new_elbow = start_pixel
+        new_wrist = start_pixel
 
     # Update new keypoints list
     new_keypoints[elbow_idx] = new_elbow
     new_keypoints[wrist_idx] = new_wrist
+    
+    print(f"  Aligned arm: shoulder={shoulder}, elbow={new_elbow}, wrist={new_wrist}")
 
     return new_keypoints
 
 
 def draw_skeleton_on_image(img: np.ndarray, keypoints: List[Tuple[int, int]], color: Tuple[int, int, int] = (0, 255, 0),
-                           thickness: int = 3):
-    """Draws a skeleton on an image."""
+                           thickness: int = 3, use_openpose_colors: bool = False):
+    """
+    Draws a skeleton on an image.
+    
+    Args:
+        img: Image to draw on
+        keypoints: List of (x, y) keypoint coordinates
+        color: Single color for all limbs (if use_openpose_colors=False)
+        thickness: Line thickness
+        use_openpose_colors: Use OpenPose colorful style
+    """
 
     connections = [
         (2, 3), (3, 4),  # Right arm
@@ -154,15 +167,53 @@ def draw_skeleton_on_image(img: np.ndarray, keypoints: List[Tuple[int, int]], co
         (0, 14), (0, 15),  # Nose to eyes
         (14, 16), (15, 17)  # Eyes to ears
     ]
+    
+    # OpenPose standard colors
+    openpose_colors = [
+        (255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0),
+        (170, 255, 0), (85, 255, 0), (0, 255, 0), (0, 255, 85),
+        (0, 255, 170), (0, 255, 255), (0, 170, 255), (0, 85, 255),
+        (0, 0, 255), (85, 0, 255), (170, 0, 255), (255, 0, 255),
+        (255, 0, 170), (255, 0, 85)
+    ]
 
-    for start_idx, end_idx in connections:
-        if len(keypoints) > max(start_idx, end_idx):
-            start_point = keypoints[start_idx]
-            end_point = keypoints[end_idx]
-            cv2.line(img, start_point, end_point, color, thickness)
+    if use_openpose_colors:
+        # Draw limbs with gradient/ellipse effect like OpenPose
+        for i, (start_idx, end_idx) in enumerate(connections):
+            if len(keypoints) > max(start_idx, end_idx):
+                start_point = keypoints[start_idx]
+                end_point = keypoints[end_idx]
+                
+                limb_color = openpose_colors[i % len(openpose_colors)]
+                
+                # keypoints are (x, y) tuples
+                # Calculate angle and length
+                x1, y1 = start_point
+                x2, y2 = end_point
+                mX = (x1 + x2) / 2
+                mY = (y1 + y2) / 2
+                length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                angle = np.degrees(np.arctan2(y1 - y2, x1 - x2))
+                
+                if length > 0:
+                    # cv2.ellipse2Poly expects (x, y) center
+                    polygon = cv2.ellipse2Poly((int(mX), int(mY)), (int(length / 2), thickness), int(angle), 0, 360, 1)
+                    cv2.fillConvexPoly(img, polygon, limb_color)
+        
+        # Draw keypoints as white circles
+        for i, point in enumerate(keypoints):
+            if point[0] > 0 and point[1] > 0:
+                cv2.circle(img, point, 4, (255, 255, 255), -1)
+    else:
+        # Original simple drawing
+        for start_idx, end_idx in connections:
+            if len(keypoints) > max(start_idx, end_idx):
+                start_point = keypoints[start_idx]
+                end_point = keypoints[end_idx]
+                cv2.line(img, start_point, end_point, color, thickness)
 
-    for i, point in enumerate(keypoints):
-        cv2.circle(img, point, 3, color, -1)
+        for i, point in enumerate(keypoints):
+            cv2.circle(img, point, 3, color, -1)
 
 
 def main():
@@ -216,8 +267,14 @@ def main():
     # Draw original skeleton (Red)
     draw_skeleton_on_image(result_img, original_keypoints, (0, 0, 255), 2)
 
-    # Draw aligned skeleton (Green)
-    draw_skeleton_on_image(result_img, aligned_keypoints, (0, 255, 0), 2)
+    # Draw aligned skeleton (OpenPose color style)
+    draw_skeleton_on_image(result_img, aligned_keypoints, (0, 255, 0), 3, use_openpose_colors=True)
+    
+    # Also save aligned skeleton on black background
+    black_bg = np.zeros_like(original_img)
+    draw_skeleton_on_image(black_bg, aligned_keypoints, (0, 255, 0), 4, use_openpose_colors=True)
+    cv2.imwrite("aligned_pose_only.png", black_bg)
+    print("OpenPose 스타일 aligned 포즈가 'aligned_pose_only.png'로 저장되었습니다.")
 
     # Draw the sketch line for reference (Blue)
     # for pixel in sketch_pixels:
@@ -225,7 +282,7 @@ def main():
 
     # Add legend
     cv2.putText(result_img, "Red: Original", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-    cv2.putText(result_img, "Green: Aligned", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(result_img, "OpenPose: Aligned", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     #cv2.putText(result_img, "Blue: Sketch", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
     # Save and display
