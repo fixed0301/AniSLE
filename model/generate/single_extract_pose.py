@@ -5,7 +5,6 @@ import torch
 import os
 
 def init_dwpose_detector(device):
-    # specify configs, ckpts and device, or it will be downloaded automatically and use cpu by default
     base_dir = os.path.dirname(os.path.abspath(__file__))
     det_config = os.path.join(base_dir, 'src/configs/yolox_l_8xb8-300e_coco.py')
     det_ckpt = os.path.join(base_dir, 'ckpts/yolox_l_8x8_300e_coco_20211126_140236-d3bd2b23.pth')

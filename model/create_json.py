@@ -5,20 +5,16 @@ device = "cpu"
 detector = DWposeDetector(device=device)
 input_image = Image.open("../flask_app/static/uploads/groundimg.jpeg").convert("RGB")
 
-pose = detector(input_image,draw_pose=None)
-
-# 이미지 저장
-# skeleton = detector(input_image, output_type="pil", include_hands=True, include_face=True)
-# skeleton.save("skeleton.png")
+pose = detector(input_image, draw_pose=None)
 
 print("Body Keypoints (x, y, confidence):")
 for i, kp in enumerate(pose['bodies']):
-    if pose['body_scores'][i // 18][i % 18] != -1:  # 유효한 키포인트만 출력
+    if pose['body_scores'][i // 18][i % 18] != -1:
         print(f"  Point {i}: x={kp[0]}, y={kp[1]}, confidence={pose['body_scores'][i // 18][i % 18]}")
 
 print("\nHand Keypoints (x, y, confidence):")
 for i, kp in enumerate(pose['hands']):
-    if pose['hands_scores'][i // 21][i % 21] > 0:  # 신뢰도 0 초과인 경우
+    if pose['hands_scores'][i // 21][i % 21] > 0:
         print(f"  Point {i}: x={kp[0]}, y={kp[1]}, confidence={pose['hands_scores'][i // 21][i % 21]}")
 
 print("\nFace Keypoints (x, y, confidence):")

@@ -49,7 +49,46 @@
       <div class="panel">
         <h3>생성 결과</h3>
         {% if result_path %}
-          <img src="{{ url_for('result_file', filename=result_path) }}" alt="Result" />
+          <div style="position: relative; width: 512px; height: 512px; margin: 0 auto;">
+            <img id="resultImage" src="{{ url_for('result_file', filename=result_path) }}" alt="Result" 
+                 style="position: absolute; top: 0; left: 0; width: 512px; height: 512px;" 
+                 crossorigin="anonymous" />
+            <canvas id="resultCanvas" width="1024" height="1024" 
+                    style="position: absolute; top: 0; left: 0; width: 512px; height: 512px; pointer-events: none;"></canvas>
+          </div>
+          <script>
+            // Draw sketch on top of result image
+            window.addEventListener('load', function() {
+              const resultImage = document.getElementById('resultImage');
+              const resultCanvas = document.getElementById('resultCanvas');
+              const ctx = resultCanvas.getContext('2d');
+              
+              resultImage.onload = function() {
+                // Clear canvas
+                ctx.clearRect(0, 0, 1024, 1024);
+                
+                // Draw sketch strokes on top
+                if (typeof strokes !== 'undefined' && strokes.length > 0) {
+                  ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+                  ctx.lineWidth = 3;
+                  ctx.lineCap = 'round';
+                  ctx.lineJoin = 'round';
+                  
+                  strokes.forEach(function(stroke) {
+                    ctx.beginPath();
+                    stroke.forEach(function(point, index) {
+                      if (index === 0) {
+                        ctx.moveTo(point.x, point.y);
+                      } else {
+                        ctx.lineTo(point.x, point.y);
+                      }
+                    });
+                    ctx.stroke();
+                  });
+                }
+              };
+            });
+          </script>
         {% else %}
           <div style="width: 100%; height: 512px; border: 2px dashed #ddd; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #999;">
             결과 대기 중
@@ -61,7 +100,7 @@
     <!-- Skeleton 시각화 섹션 -->
     <div style="margin-top: 40px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
       <h2>처리 과정 시각화</h2>
-      <div class="container">
+      <div class="container" style="max-width: 2100px;">
         <!-- 원본 Skeleton -->
         <div class="panel">
           <h3>탐지된 포즈 (Original Pose)</h3>
@@ -76,18 +115,22 @@
           <p style="color: #666; margin-top: 10px;">업로드된 이미지에서 자동으로 탐지된 사람의 포즈</p>
         </div>
 
-        <!-- Aligned Skeleton -->
+        <!-- Aligned Skeleton (ControlNet용 COCO 색상) -->
         <div class="panel">
-          <h3>정렬된 포즈 (Aligned Pose)</h3>
-          {% if image_path %}
-            <img src="{{ url_for('aligned_pose_file', filename='aligned_' + image_path.split('.')[0] + '.png') }}" 
-                 alt="Aligned Pose"
+          <h3>정렬된 포즈 (For ControlNet)</h3>
+          {% if result_path %}
+            <img id="alignedPoseImage" src="{{ url_for('result_file', filename='debug_ipadapter_pose.png') }}?t={{ range(1, 9999999) | random }}" 
+                 alt="ControlNet Pose"
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
             <div style="width: 100%; height: 512px; border: 2px dashed #ddd; border-radius: 4px; display: none; align-items: center; justify-content: center; color: #999;">
-              정렬 대기 중
+              포즈 정렬 대기 중
+            </div>
+          {% else %}
+            <div id="alignedPosePlaceholder" style="width: 100%; height: 512px; border: 2px dashed #ddd; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #999;">
+              스케치 생성 후 표시됩니다
             </div>
           {% endif %}
-          <p style="color: #666; margin-top: 10px;">스케치에 맞춰 조정된 포즈 (빨간 선 = 스케치)</p>
+          <p style="color: #666; margin-top: 10px;">ControlNet에 입력되는 COCO 표준 색상 포즈 (1024x1024)</p>
         </div>
 
         <!-- 생성된 Mask -->
@@ -101,41 +144,73 @@
               마스크 생성 대기 중
             </div>
           {% endif %}
-          <p style="color: #666; margin-top: 10px;">AI가 수정할 영역 (하얀색 = 변경, 검은색 = 유지)</p>
+          <p style="color: #666; margin-top: 10px;">AI가 수정할 영역 </p>
         </div>
       </div>
     </div>
 
     <!-- AI 처리 진행상황 표시 -->
     {% if processing %}
-      <div id="progressContainer" style="margin: 20px auto; max-width: 600px;">
-        <h2>AI 처리 중...</h2>
-        <div id="progressBar" style="width: 100%; height: 30px; background: #f0f0f0; border-radius: 5px; overflow: hidden;">
-          <div id="progressFill" style="width: 0%; height: 100%; background: #4CAF50; transition: width 0.3s;"></div>
+      <div id="progressContainer" style="margin: 20px auto; max-width: 800px; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <h2> AI 처리 중...</h2>
+        <div id="progressBar" style="width: 100%; height: 40px; background: #f0f0f0; border-radius: 8px; overflow: hidden; margin: 20px 0;">
+          <div id="progressFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); transition: width 0.5s ease;"></div>
         </div>
-        <p id="progressMessage" style="margin-top: 10px;">처리 대기 중...</p>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 12px; color: #666;">
+          <span>Step 1: 포즈 추출</span>
+          <span>Step 2: 정렬</span>
+          <span>Step 3: 마스크</span>
+          <span>Step 4: AI 생성</span>
+        </div>
+        <p id="progressMessage" style="margin-top: 10px; font-size: 16px; font-weight: bold; color: #333;">처리 대기 중...</p>
+        <p id="progressDetails" style="margin-top: 5px; font-size: 14px; color: #666;">잠시만 기다려주세요...</p>
       </div>
       
       <script>
         const idx = "{{ idx }}";
         const eventSource = new EventSource(`/stream/${idx}`);
         
+        // Hide previous aligned pose image when processing starts
+        const alignedPosePlaceholder = document.getElementById('alignedPosePlaceholder');
+        if (alignedPosePlaceholder) {
+          alignedPosePlaceholder.style.display = 'flex';
+        }
+        const alignedPoseImage = document.getElementById('alignedPoseImage');
+        if (alignedPoseImage) {
+          alignedPoseImage.style.display = 'none';
+        }
+        
         eventSource.onmessage = function(event) {
           const data = JSON.parse(event.data);
           console.log('Status update:', data);
           
-          // Progress bar 업데이트
-          const progress = (data.step / 3) * 100;
+          // Progress bar 업데이트 (4단계)
+          const progress = (data.step / 4) * 100;
           document.getElementById('progressFill').style.width = progress + '%';
           document.getElementById('progressMessage').textContent = data.message;
+          
+          // 상세 설명 추가
+          let details = '';
+          if (data.step === 1) {
+            details = 'DWPose 모델로 관절 위치를 감지하고 있습니다...';
+          } else if (data.step === 2) {
+            details = '스케치 라인에 맞춰 팔 keypoints를 조정하고 있습니다...';
+          } else if (data.step === 3) {
+            details = '마스크를 생성하고 있습니다...';
+          } else if (data.step === 4) {
+            details = 'SDXL + ControlNet + IP-Adapter로 고품질 이미지를 생성하고 있습니다... ';
+          }
+          document.getElementById('progressDetails').textContent = details;
           
           // 완료 시 결과 이미지 표시
           if (data.status === 'completed') {
             eventSource.close();
-            document.getElementById('progressMessage').textContent = '완료! 페이지를 새로고침하여 결과를 확인하세요.';
+            document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #4CAF50, #66BB6A)';
+            document.getElementById('progressMessage').textContent = '완료! 결과를 확인하세요.';
+            document.getElementById('progressDetails').textContent = '생성된 이미지를 확인해보세요!';
             setTimeout(() => {
               location.reload();
-            }, 1000);
+            }, 1500);
           }
           
           // 에러 시
@@ -143,7 +218,8 @@
             eventSource.close();
             document.getElementById('progressBar').style.background = '#ffcccc';
             document.getElementById('progressFill').style.background = '#ff0000';
-            document.getElementById('progressMessage').textContent = '오류: ' + data.message;
+            document.getElementById('progressMessage').textContent = '❌ 오류: ' + data.message;
+            document.getElementById('progressDetails').textContent = '문제가 발생했습니다. 다시 시도해주세요.';
           }
         };
         

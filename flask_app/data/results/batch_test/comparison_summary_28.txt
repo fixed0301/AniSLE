@@ -1,0 +1,30 @@
+Parameter Sweep Results
+================================================================================
+
+Fixed parameters:
+  - idx: 28
+  - controlnet_scale: 1.2
+  - strength: 1.0
+  - steps: 40
+
+Tested parameters:
+  - ip_scale: [0.3, 0.4, 0.5, 0.6]
+  - guidance: [3.4, 3.6, 3.8, 4.0]
+
+Results (16 images):
+  - ip_scale=0.3, guidance=3.4 -> ip0.3_g3.4.png
+  - ip_scale=0.3, guidance=3.6 -> ip0.3_g3.6.png
+  - ip_scale=0.3, guidance=3.8 -> ip0.3_g3.8.png
+  - ip_scale=0.3, guidance=4.0 -> ip0.3_g4.0.png
+  - ip_scale=0.4, guidance=3.4 -> ip0.4_g3.4.png
+  - ip_scale=0.4, guidance=3.6 -> ip0.4_g3.6.png
+  - ip_scale=0.4, guidance=3.8 -> ip0.4_g3.8.png
+  - ip_scale=0.4, guidance=4.0 -> ip0.4_g4.0.png
+  - ip_scale=0.5, guidance=3.4 -> ip0.5_g3.4.png
+  - ip_scale=0.5, guidance=3.6 -> ip0.5_g3.6.png
+  - ip_scale=0.5, guidance=3.8 -> ip0.5_g3.8.png
+  - ip_scale=0.5, guidance=4.0 -> ip0.5_g4.0.png
+  - ip_scale=0.6, guidance=3.4 -> ip0.6_g3.4.png
+  - ip_scale=0.6, guidance=3.6 -> ip0.6_g3.6.png
+  - ip_scale=0.6, guidance=3.8 -> ip0.6_g3.8.png
+  - ip_scale=0.6, guidance=4.0 -> ip0.6_g4.0.png

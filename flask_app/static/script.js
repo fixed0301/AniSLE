@@ -44,10 +44,13 @@ function saveSketch(event) {
     fetch('/save_sketch', { method: 'POST', body: formData })
       .then(res => res.text())
       .then(html => {
-        // HTML 응답을 직접 표시
+        // HTML 응답을 직접 표시 (캔버스는 유지됨)
         document.open();
         document.write(html);
         document.close();
+        
+        // 페이지 다시 로드되면서 setup()이 다시 실행되어 캔버스가 재생성됨
+        // setup() 함수는 p5.js가 자동으로 호출함
       })
       .catch(console.error);
   }, 'image/png');

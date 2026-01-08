@@ -6,13 +6,12 @@ from typing import List, Tuple, Optional
 
 
 def load_keypoints(json_path: str) -> dict:
-    """Loads keypoints from a JSON file."""
     with open(json_path, 'r') as f:
         return json.load(f)
 
 
 def denormalize_keypoints(keypoints: List[List[float]], img_shape: Tuple[int, int]) -> List[Tuple[int, int]]:
-    """Denormalizes a list of [x, y] keypoint pairs to image coordinates."""
+    """normalized keypoints를 이미지 픽셀 좌표로 변환"""
     height, width = img_shape[:2]
     result = []
     for point in keypoints:
@@ -22,34 +21,27 @@ def denormalize_keypoints(keypoints: List[List[float]], img_shape: Tuple[int, in
     return result
 
 def save_keypoints(keypoints: List[Tuple[int, int]], filename: str):
-    """Saves keypoints to a JSON file."""
-    # Keypoints are in pixel coordinates (integers).
     with open(filename, 'w') as f:
         json.dump(keypoints, f, indent=4)
     print(f"정렬된 키포인트가 '{filename}'에 저장되었습니다.")
 
 def get_sketch_red_pixels(sketch_img: np.ndarray) -> List[Tuple[int, int]]:
-    """Extracts all red pixels from the sketch image."""
+    """스케치 이미지에서 빨간색 픽셀 좌표 추출"""
     if len(sketch_img.shape) == 2:
         sketch_img = cv2.cvtColor(sketch_img, cv2.COLOR_GRAY2BGR)
 
-    # Define a range for the red color
     lower_red = np.array([0, 0, 100])
     upper_red = np.array([50, 50, 255])
-
-    # Create a mask for red pixels
     mask = cv2.inRange(sketch_img, lower_red, upper_red)
     red_pixels = cv2.findNonZero(mask)
 
     if red_pixels is None or len(red_pixels) < 2:
         return []
-
-    # Reshape to a list of tuples
     return [tuple(p[0]) for p in red_pixels]
 
 
 def find_closest_arm(sketch_start: Tuple[int, int], original_keypoints: List[Tuple[int, int]]) -> Optional[str]:
-    """Determines if the sketch is for the left or right arm based on the closest shoulder."""
+    """스케치 시작점과 가장 가까운 어깨를 기준으로 좌우 팔 결정"""
     if len(original_keypoints) < 8:
         print("키포인트가 부족하여 팔을 선택할 수 없습니다.")
         return None
@@ -73,8 +65,7 @@ def find_closest_arm(sketch_start: Tuple[int, int], original_keypoints: List[Tup
 
 def align_arm_to_sketch(original_keypoints: List[Tuple[int, int]], sketch_pixels: List[Tuple[int, int]],
                         arm_to_align: str) -> List[Tuple[int, int]]:
-    """Aligns the specified arm to the sketch curve, preserving original segment lengths."""
-
+    """스케치 곡선에 맞춰 팔 정렬 (원본 팔 길이 유지)"""
     new_keypoints = original_keypoints.copy()
 
     if arm_to_align == "right":
@@ -99,46 +90,35 @@ def align_arm_to_sketch(original_keypoints: List[Tuple[int, int]], sketch_pixels
         print("스케치 픽셀이 없습니다. 정렬을 건너뜁니다.")
         return original_keypoints
 
-    # Calculate original arm segment lengths
+    # 원본 팔 길이 계산
     original_upper_arm_length = distance(shoulder, elbow)
     original_forearm_length = distance(elbow, wrist)
 
-    # Find sketch start and end points
-    # Start: closest to shoulder
-    # End: farthest from shoulder
+    # 스케치 시작/끝점 찾기 (어깨 기준 가장 가깝고/먼 점)
     start_pixel = min(sketch_pixels, key=lambda p: distance(p, shoulder))
     end_pixel = max(sketch_pixels, key=lambda p: distance(p, shoulder))
-    
     print(f"  Sketch: start={start_pixel}, end={end_pixel}, {len(sketch_pixels)} pixels")
     
-    # Direction from shoulder toward the end of the sketch
+    # 스케치 방향으로 팔 재배치
     sketch_direction = (end_pixel[0] - start_pixel[0], end_pixel[1] - start_pixel[1])
     sketch_length = distance(start_pixel, end_pixel)
     
     if sketch_length > 0:
-        # Unit vector along the sketch direction
         unit_vector = (sketch_direction[0] / sketch_length, sketch_direction[1] / sketch_length)
-        
-        # New elbow: move from shoulder along sketch direction by upper arm length
         new_elbow = (
             int(shoulder[0] + unit_vector[0] * original_upper_arm_length),
             int(shoulder[1] + unit_vector[1] * original_upper_arm_length)
         )
-        
-        # New wrist: continue from elbow along sketch direction by forearm length
         new_wrist = (
             int(new_elbow[0] + unit_vector[0] * original_forearm_length),
             int(new_elbow[1] + unit_vector[1] * original_forearm_length)
         )
     else:
-        # Sketch is just a point
         new_elbow = start_pixel
         new_wrist = start_pixel
 
-    # Update new keypoints list
     new_keypoints[elbow_idx] = new_elbow
     new_keypoints[wrist_idx] = new_wrist
-    
     print(f"  Aligned arm: shoulder={shoulder}, elbow={new_elbow}, wrist={new_wrist}")
 
     return new_keypoints
@@ -146,29 +126,18 @@ def align_arm_to_sketch(original_keypoints: List[Tuple[int, int]], sketch_pixels
 
 def draw_skeleton_on_image(img: np.ndarray, keypoints: List[Tuple[int, int]], color: Tuple[int, int, int] = (0, 255, 0),
                            thickness: int = 3, use_openpose_colors: bool = False):
-    """
-    Draws a skeleton on an image.
-    
-    Args:
-        img: Image to draw on
-        keypoints: List of (x, y) keypoint coordinates
-        color: Single color for all limbs (if use_openpose_colors=False)
-        thickness: Line thickness
-        use_openpose_colors: Use OpenPose colorful style
-    """
-
+    """이미지에 스켈레톤 그리기 (OpenPose 스타일 지원)"""
     connections = [
-        (2, 3), (3, 4),  # Right arm
-        (5, 6), (6, 7),  # Left arm
-        (1, 2), (1, 5),  # Neck to shoulders
-        (1, 0),  # Neck to nose
-        (1, 8), (8, 9), (9, 10),  # Torso and right hip/leg
-        (1, 11), (11, 12), (12, 13),  # Torso and left hip/leg
-        (0, 14), (0, 15),  # Nose to eyes
-        (14, 16), (15, 17)  # Eyes to ears
+        (2, 3), (3, 4),
+        (5, 6), (6, 7),
+        (1, 2), (1, 5),
+        (1, 0),
+        (1, 8), (8, 9), (9, 10),
+        (1, 11), (11, 12), (12, 13),
+        (0, 14), (0, 15),
+        (14, 16), (15, 17)
     ]
     
-    # OpenPose standard colors
     openpose_colors = [
         (255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0),
         (170, 255, 0), (85, 255, 0), (0, 255, 0), (0, 255, 85),
@@ -178,16 +147,12 @@ def draw_skeleton_on_image(img: np.ndarray, keypoints: List[Tuple[int, int]], co
     ]
 
     if use_openpose_colors:
-        # Draw limbs with gradient/ellipse effect like OpenPose
         for i, (start_idx, end_idx) in enumerate(connections):
             if len(keypoints) > max(start_idx, end_idx):
                 start_point = keypoints[start_idx]
                 end_point = keypoints[end_idx]
-                
                 limb_color = openpose_colors[i % len(openpose_colors)]
                 
-                # keypoints are (x, y) tuples
-                # Calculate angle and length
                 x1, y1 = start_point
                 x2, y2 = end_point
                 mX = (x1 + x2) / 2
@@ -196,16 +161,13 @@ def draw_skeleton_on_image(img: np.ndarray, keypoints: List[Tuple[int, int]], co
                 angle = np.degrees(np.arctan2(y1 - y2, x1 - x2))
                 
                 if length > 0:
-                    # cv2.ellipse2Poly expects (x, y) center
                     polygon = cv2.ellipse2Poly((int(mX), int(mY)), (int(length / 2), thickness), int(angle), 0, 360, 1)
                     cv2.fillConvexPoly(img, polygon, limb_color)
         
-        # Draw keypoints as white circles
         for i, point in enumerate(keypoints):
             if point[0] > 0 and point[1] > 0:
                 cv2.circle(img, point, 4, (255, 255, 255), -1)
     else:
-        # Original simple drawing
         for start_idx, end_idx in connections:
             if len(keypoints) > max(start_idx, end_idx):
                 start_point = keypoints[start_idx]
@@ -217,12 +179,10 @@ def draw_skeleton_on_image(img: np.ndarray, keypoints: List[Tuple[int, int]], co
 
 
 def main():
-    # File paths
     original_image_path = "../flask_app/static/uploads/groundimg.jpeg"
     sketch_image_path = "../flask_app/static/sketch/sketch_groundimg.png"
     keypoints_path = "keypoints.json"
 
-    # Load images and data
     original_img = cv2.imread(original_image_path)
     sketch_img = cv2.imread(sketch_image_path)
 
@@ -230,7 +190,7 @@ def main():
         print("Error: Could not load images.")
         return
 
-    # Load and normalize keypoints
+    # 키포인트 로드 및 픽셀 좌표 변환
     try:
         keypoints_data = load_keypoints(keypoints_path)
         body_keypoints_raw = keypoints_data['bodies']
@@ -242,57 +202,38 @@ def main():
         print(f"오류: 키포인트 파일을 읽는 중 문제가 발생했습니다 - {e}")
         return
 
-    # Extract sketch information
     sketch_pixels = get_sketch_red_pixels(sketch_img)
     if not sketch_pixels:
         print("스케치에서 빨간색 선을 찾지 못했습니다.")
         return
 
-    # Find the starting point of the sketch line (closest to a shoulder)
+    # 스케치와 가까운 어깨 찾아서 정렬할 팔 결정
     sketch_start_point = min(sketch_pixels, key=lambda p: math.sqrt(
         (p[0] - original_keypoints[2][0]) ** 2 + (p[1] - original_keypoints[2][1]) ** 2))
-
-    # Determine which arm to align
     arm_to_align = find_closest_arm(sketch_start_point, original_keypoints)
-
-    # Align the chosen arm to the sketch curve
     aligned_keypoints = align_arm_to_sketch(original_keypoints, sketch_pixels, arm_to_align)
 
-    # Save the aligned keypoints to a new JSON file
     save_keypoints(aligned_keypoints, "keypoints_aligned.json")
 
-    # Create the result image
+    # 결과 이미지 생성 및 저장
     result_img = original_img.copy()
-
-    # Draw original skeleton (Red)
     draw_skeleton_on_image(result_img, original_keypoints, (0, 0, 255), 2)
-
-    # Draw aligned skeleton (OpenPose color style)
     draw_skeleton_on_image(result_img, aligned_keypoints, (0, 255, 0), 3, use_openpose_colors=True)
     
-    # Also save aligned skeleton on black background
     black_bg = np.zeros_like(original_img)
     draw_skeleton_on_image(black_bg, aligned_keypoints, (0, 255, 0), 4, use_openpose_colors=True)
     cv2.imwrite("aligned_pose_only.png", black_bg)
     print("OpenPose 스타일 aligned 포즈가 'aligned_pose_only.png'로 저장되었습니다.")
 
-    # Draw the sketch line for reference (Blue)
-    # for pixel in sketch_pixels:
-    #     cv2.circle(result_img, pixel, 1, (255, 0, 0), -1)
-
-    # Add legend
     cv2.putText(result_img, "Red: Original", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     cv2.putText(result_img, "OpenPose: Aligned", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    #cv2.putText(result_img, "Blue: Sketch", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-    # Save and display
     cv2.imwrite("aligned_result.jpg", result_img)
     print("결과가 'aligned_result.jpg'로 저장되었습니다.")
 
     cv2.imshow("Aligned Skeleton", result_img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-# hand keypoint도 반영하도록
 
 if __name__ == "__main__":
     main()

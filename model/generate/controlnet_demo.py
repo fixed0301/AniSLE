@@ -21,13 +21,9 @@ import cv2
 
 
 def keypoints_to_pose_image(keypoints, image_size=(512, 512)):
-    """
-    Convert keypoints JSON to ControlNet-compatible pose image
-    Uses OpenPose visualization format that ControlNet expects
-    """
+    """keypoints를 ControlNet 호환 OpenPose 이미지로 변환"""
     import numpy as np
     
-    # Check if keypoints need scaling
     max_coord = max(max(kp[0], kp[1]) for kp in keypoints)
     target_size = image_size[0]
     
@@ -39,22 +35,18 @@ def keypoints_to_pose_image(keypoints, image_size=(512, 512)):
         scaled_keypoints = [[kp[0], kp[1]] for kp in keypoints]
         print(f"  Keypoints already at {target_size}")
     
-    # Ensure 18 keypoints
     while len(scaled_keypoints) < 18:
         scaled_keypoints.append([0, 0])
     
-    # Create canvas
     canvas = np.zeros((image_size[0], image_size[1], 3), dtype=np.uint8)
     
-    # OpenPose connections with colors (ControlNet format)
     limbSeq = [
-        [2, 3], [2, 6], [3, 4], [4, 5], [6, 7], [7, 8],  # Arms
-        [2, 9], [9, 10], [10, 11], [2, 12], [12, 13], [13, 14],  # Legs
-        [2, 1], [1, 15], [15, 17], [1, 16], [16, 18],  # Head
-        [3, 17], [6, 18]  # Shoulders to ears
+        [2, 3], [2, 6], [3, 4], [4, 5], [6, 7], [7, 8],
+        [2, 9], [9, 10], [10, 11], [2, 12], [12, 13], [13, 14],
+        [2, 1], [1, 15], [15, 17], [1, 16], [16, 18],
+        [3, 17], [6, 18]
     ]
     
-    # Colors for each limb (OpenPose standard)
     colors = [
         [255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], 
         [170, 255, 0], [85, 255, 0], [0, 255, 0], [0, 255, 85],
@@ -63,14 +55,13 @@ def keypoints_to_pose_image(keypoints, image_size=(512, 512)):
         [255, 0, 170], [255, 0, 85], [255, 0, 0]
     ]
     
-    # Draw limbs
     for i, limb in enumerate(limbSeq):
-        idx1, idx2 = limb[0] - 1, limb[1] - 1  # Convert to 0-indexed
+        idx1, idx2 = limb[0] - 1, limb[1] - 1
         if idx1 < len(scaled_keypoints) and idx2 < len(scaled_keypoints):
             Y = [scaled_keypoints[idx1][0], scaled_keypoints[idx2][0]]
             X = [scaled_keypoints[idx1][1], scaled_keypoints[idx2][1]]
             
-            if Y[0] > 0 and Y[1] > 0:  # Valid keypoints
+            if Y[0] > 0 and Y[1] > 0:
                 mX = np.mean(X)
                 mY = np.mean(Y)
                 length = ((X[0] - X[1]) ** 2 + (Y[0] - Y[1]) ** 2) ** 0.5
@@ -78,7 +69,6 @@ def keypoints_to_pose_image(keypoints, image_size=(512, 512)):
                 polygon = cv2.ellipse2Poly((int(mY), int(mX)), (int(length / 2), 4), int(angle), 0, 360, 1)
                 cv2.fillConvexPoly(canvas, polygon, colors[i % len(colors)])
     
-    # Draw keypoints
     for i, point in enumerate(scaled_keypoints[:18]):
         x, y = int(point[0]), int(point[1])
         if x > 0 and y > 0:
